@@ -24,7 +24,7 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "https://collections-manage.netlify.app",
+    origin: "http://localhost:5173",
     credentials: true,
   })
 );
@@ -107,12 +107,11 @@ app.post("/login", async (req, res) => {
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "development",
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
+      domain: "https://collections-manage.netlify.app/",
     });
-
-    // generateTokenAndSetCookie(userData, res);
 
     await user.update({ last_login: new Date() });
 
@@ -233,7 +232,7 @@ app.get("/collection/:collection_id", async (req, res) => {
   }
 });
 
-// collection custom fileds
+// collection custom fields
 app.get("/collection/:collection_id/custom-fields", async (req, res) => {
   try {
     const customFields = await CustomField.findAll({
@@ -591,9 +590,9 @@ app.get("/recent/items", async (req, res) => {
   }
 });
 
-app.get("/users", async (req, res) => {
+app.get("/users/:role", async (req, res) => {
   try {
-    const { role } = req.user;
+    const { role } = req.params;
 
     if (role !== "Admin") {
       return res.status(403).json({ message: "Access denied: Admins only" });
