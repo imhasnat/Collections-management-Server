@@ -1,7 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../database");
-const CustomFieldValue = require("./CustomFieldValue");
-const Collection = require("./Collection");
 
 const CustomField = sequelize.define(
   "CustomField",
@@ -41,10 +39,5 @@ const CustomField = sequelize.define(
     updatedAt: false, // Only createdAt is tracked, no updatedAt
   }
 );
-
-CustomField.belongsTo(Collection, {
-  foreignKey: "collection_id",
-  as: "collection",
-});
 
 module.exports = CustomField;

@@ -5,24 +5,33 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const sequelize = require("./database");
 const cookieParser = require("cookie-parser");
+const models = require("./models");
+
 const {
   User,
   Collection,
   CustomField,
-  CustomFieldValue,
   Item,
-  ItemTag,
-  Tag,
   Comment,
   Like,
-} = require("./models/All");
+  Tag,
+  ItemTag,
+  CustomFieldValue,
+} = models;
 
 const app = express();
 app.use(cookieParser());
 
+// app.use(
+//   cors({
+//     origin: "https://collections-manage.netlify.app",
+//     credentials: true,
+//   })
+// );
+
 app.use(
   cors({
-    origin: "https://collections-manage.netlify.app",
+    origin: "http://localhost:5173",
     credentials: true,
   })
 );
@@ -71,10 +80,6 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// const generateTokenAndSetCookie = (userData, res) => {
-
-// };
-
 // Login endpoint
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
@@ -83,6 +88,12 @@ app.post("/login", async (req, res) => {
     const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(400).json({ message: "User not found" });
+    }
+
+    if (user.status === "Blocked") {
+      return res
+        .status(403)
+        .json({ message: "Your account is blocked. Please contact support." });
     }
 
     const validPassword = await bcrypt.compare(password, user.password);
@@ -379,6 +390,10 @@ app.get("/collection/:collection_id/items", async (req, res) => {
       where: { collection_id: req.params.collection_id },
       include: [
         {
+          model: CustomField,
+          as: "custom_fields",
+        },
+        {
           model: CustomFieldValue,
           as: "custom_field_values",
         },
@@ -388,27 +403,6 @@ app.get("/collection/:collection_id/items", async (req, res) => {
         },
       ],
     });
-    res.json(items);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-app.get("/items", async (req, res) => {
-  try {
-    const items = await Item.findAll({
-      include: [
-        {
-          model: CustomField,
-          as: "custom_fields",
-          through: { attributes: [] }, // This removes the join table (CustomFieldValue) data from the result
-        },
-        { model: Comment, as: "comments" },
-        { model: Like, as: "likes" },
-        { model: Tag, as: "tags_" },
-      ],
-    });
-
     res.json(items);
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -450,74 +444,87 @@ app.delete("/items/:item_id", async (req, res) => {
   }
 });
 
+app.get("/items/:item_id", async (req, res) => {
+  const { item_id } = req.params;
+
+  try {
+    const items = await Item.findByPk(item_id, {
+      include: [
+        {
+          model: CustomField,
+          as: "custom_fields",
+        },
+        {
+          model: Tag,
+          through: { attributes: [] },
+        },
+      ],
+    });
+
+    res.json(items);
+  } catch (error) {
+    console.error("Error fetching item:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 app.put("/items/:item_id", async (req, res) => {
   const { item_id } = req.params;
   const { name, custom_field_values, tags } = req.body;
 
   try {
-    const result = await sequelize.transaction(async (t) => {
-      // Find the item
-      const item = await Item.findByPk(item_id, { transaction: t });
+    // 1. Update item name
+    if (name) {
+      await Item.update({ name }, { where: { item_id } });
+      console.log(`Item name updated to ${name}`);
+    }
 
-      if (!item) {
-        throw new Error("Item not found");
-      }
+    // 2. Update custom field values
+    if (custom_field_values && Object.keys(custom_field_values).length > 0) {
+      // Remove old custom field values
+      await CustomFieldValue.destroy({ where: { item_id } });
+      console.log(`Old custom field values for item_id ${item_id} deleted`);
 
-      // Update item name
-      await item.update({ name }, { transaction: t });
+      // Add new custom field values
+      const customFieldData = Object.entries(custom_field_values).map(
+        ([custom_field_id, field_value]) => ({
+          item_id: item_id,
+          custom_field_id: parseInt(custom_field_id),
+          field_value,
+        })
+      );
+      await CustomFieldValue.bulkCreate(customFieldData);
+      console.log(`New custom field values created for item_id ${item_id}`);
+    }
 
-      // Fetch existing custom fields for this item
-      const existingCustomFields = await CustomField.findAll({
-        where: { collection_id: item.collection_id },
-        attributes: ["custom_field_id"],
-        raw: true,
-        transaction: t,
-      });
-
-      const validCustomFieldIds = existingCustomFields.map(
-        (cf) => cf.custom_field_id
+    // 3. Update tags
+    if (tags && tags.length > 0) {
+      // Find or create the tags
+      const tagInstances = await Promise.all(
+        tags.map((tagName) =>
+          Tag.findOrCreate({
+            where: { tag_name: tagName },
+            defaults: { tag_name: tagName },
+          })
+        )
+      );
+      console.log(
+        `Tags found or created: ${tagInstances
+          .map(([tag]) => tag.tag_name)
+          .join(", ")}`
       );
 
-      // Update custom field values
-      if (custom_field_values && Object.keys(custom_field_values).length > 0) {
-        for (const [custom_field_id, field_value] of Object.entries(
-          custom_field_values
-        )) {
-          if (validCustomFieldIds.includes(parseInt(custom_field_id))) {
-            await CustomFieldValue.upsert(
-              {
-                item_id: item_id,
-                custom_field_id: parseInt(custom_field_id),
-                field_value: field_value,
-              },
-              { transaction: t }
-            );
-          }
-        }
-      }
+      // Remove old associations
+      await ItemTag.destroy({ where: { item_id } });
 
-      // Update tags
-      if (tags && tags.length > 0) {
-        // Find or create tags
-        const tagInstances = await Promise.all(
-          tags.map((tagName) =>
-            Tag.findOrCreate({
-              where: { tag_name: tagName }, // Changed from 'name' to 'tag_name'
-              defaults: { tag_name: tagName }, // Changed from 'name' to 'tag_name'
-              transaction: t,
-            })
-          )
-        );
-
-        // Set the tags for the item
-        await item.setTags(
-          tagInstances.map(([tag]) => tag),
-          { transaction: t }
-        );
-      }
-
-      return item;
-    });
+      // Create new associations
+      const itemTags = tagInstances.map(([tag]) => ({
+        item_id: item_id,
+        tag_id: tag.tag_id,
+      }));
+      await ItemTag.bulkCreate(itemTags);
+      console.log(`Tags associated with item_id ${item_id}`);
+    }
 
     // Fetch the updated item with its associations
     const updatedItem = await Item.findByPk(item_id, {
@@ -537,6 +544,187 @@ app.put("/items/:item_id", async (req, res) => {
   } catch (error) {
     console.error("Error updating item:", error);
     res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/collections/top", async (req, res) => {
+  try {
+    const topCollections = await Collection.findAll({
+      attributes: [
+        "collection_id",
+        "name",
+        [sequelize.fn("COUNT", sequelize.col("Items.item_id")), "item_count"],
+      ],
+      include: [
+        {
+          model: Item,
+          attributes: [],
+        },
+      ],
+      group: ["Collection.collection_id"],
+      order: [[sequelize.literal("item_count"), "DESC"]],
+      limit: 5,
+      subQuery: false,
+    });
+
+    res.json(topCollections);
+  } catch (error) {
+    console.error("Error fetching top collections:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get("/recent/items", async (req, res) => {
+  try {
+    const items = await Item.findAll({
+      include: [
+        {
+          model: CustomField,
+          as: "custom_fields",
+        },
+        {
+          model: Tag,
+          through: { attributes: [] },
+        },
+      ],
+      order: [["created_at", "DESC"]],
+      limit: 10,
+    });
+
+    res.json(items);
+  } catch (error) {
+    console.error("Error fetching items:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/users", async (req, res) => {
+  try {
+    const { role } = req.user;
+
+    if (role !== "Admin") {
+      return res.status(403).json({ message: "Access denied: Admins only" });
+    }
+
+    const users = await User.findAll({});
+
+    res.status(200).json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/users/:user_id/block", async (req, res) => {
+  const { user_id } = req.params;
+
+  try {
+    const user = await User.findByPk(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (req.user.role !== "Admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can change user status" });
+    }
+
+    await user.update({ status: "Blocked" });
+
+    return res.status(200).json({ message: "User blocked successfully" });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error blocking user",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/users/:user_id/role", async (req, res) => {
+  const { user_id } = req.params;
+  const { role } = req.body; // expected role: 'Admin' or 'User'
+
+  if (req.user.role !== "Admin") {
+    return res
+      .status(403)
+      .json({ message: "Only admins can change user roles" });
+  }
+
+  try {
+    const user = await User.findByPk(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await user.update({ role });
+
+    return res.status(200).json({ message: `User role updated to ${role}` });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error updating user role",
+      error: error.message,
+    });
+  }
+});
+
+app.delete("/users/:user_id", async (req, res) => {
+  const { user_id } = req.params;
+
+  if (req.user.role !== "Admin") {
+    return res.status(403).json({ message: "Only admins can delete users" });
+  }
+
+  try {
+    const user = await User.findByPk(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await user.destroy();
+
+    return res.status(200).json({ message: "User deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error deleting user",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/users/:user_id/remove-admin", async (req, res) => {
+  const { user_id } = req.params;
+
+  if (req.user.user_id !== parseInt(user_id)) {
+    return res
+      .status(403)
+      .json({ message: "You can only remove your own admin privileges" });
+  }
+
+  try {
+    const adminCount = await User.count({ where: { role: "Admin" } });
+
+    if (adminCount <= 1) {
+      return res.status(400).json({
+        message:
+          "You cannot remove your admin privileges because you are the only admin",
+      });
+    }
+
+    const user = await User.findByPk(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await user.update({ role: "User" });
+
+    return res
+      .status(200)
+      .json({ message: "Admin privileges removed successfully" });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error removing admin privileges",
+      error: error.message,
+    });
   }
 });
 

@@ -1,10 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../database");
 
-const User = require("./User");
-const CustomField = require("./CustomField");
-const Item = require("./Item");
-
 const Collection = sequelize.define(
   "Collection",
   {
@@ -38,7 +34,5 @@ const Collection = sequelize.define(
     updatedAt: "updated_at",
   }
 );
-
-Collection.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
 module.exports = Collection;

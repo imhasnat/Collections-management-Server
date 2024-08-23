@@ -1,7 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../database");
-const CustomField = require("./CustomField");
-const Item = require("./Item");
 
 const CustomFieldValue = sequelize.define(
   "CustomFieldValue",
@@ -28,11 +26,5 @@ const CustomFieldValue = sequelize.define(
     timestamps: false,
   }
 );
-
-CustomFieldValue.belongsTo(Item, { foreignKey: "item_id", as: "item" });
-CustomFieldValue.belongsTo(CustomField, {
-  foreignKey: "custom_field_id",
-  as: "custom_field",
-});
 
 module.exports = CustomFieldValue;

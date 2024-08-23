@@ -272,6 +272,9 @@ Collection.hasMany(CustomField, {
   foreignKey: "collection_id",
   as: "custom_fields",
 });
+Collection.hasMany(Item, {
+  foreignKey: "collection_id",
+});
 
 // CustomField Associations
 CustomField.belongsTo(Collection, {
@@ -300,11 +303,6 @@ Item.hasMany(CustomFieldValue, {
 });
 Item.hasMany(Comment, { foreignKey: "item_id", as: "comments" });
 Item.hasMany(Like, { foreignKey: "item_id", as: "likes" });
-// Item.belongsToMany(Tag, {
-//   through: "ItemTag", // Ensure the table name is "ItemTag"
-//   foreignKey: "item_id",
-//   as: "tag", // Use "tags_" to avoid conflict with any reserved keywords
-// });
 Item.belongsToMany(Tag, { through: ItemTag, foreignKey: "item_id" });
 Tag.belongsToMany(Item, { through: ItemTag, foreignKey: "tag_id" });
 

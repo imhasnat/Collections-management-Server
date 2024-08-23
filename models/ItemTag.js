@@ -1,7 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../database");
-const Item = require("./Item");
-const Tag = require("./Tag");
 
 const ItemTag = sequelize.define(
   "ItemTag",
@@ -20,8 +18,5 @@ const ItemTag = sequelize.define(
     timestamps: false,
   }
 );
-
-ItemTag.belongsTo(Item, { foreignKey: "item_id", as: "item" });
-ItemTag.belongsTo(Tag, { foreignKey: "tag_id", as: "tag" });
 
 module.exports = ItemTag;
