@@ -590,10 +590,9 @@ app.get("/recent/items", async (req, res) => {
   }
 });
 
-app.get("/users/:role", async (req, res) => {
+app.get("/users", authenticateToken, async (req, res) => {
   try {
-    const { role } = req.params;
-
+    const { role } = req.user;
     if (role !== "Admin") {
       return res.status(403).json({ message: "Access denied: Admins only" });
     }
@@ -607,7 +606,7 @@ app.get("/users/:role", async (req, res) => {
   }
 });
 
-app.put("/users/:user_id/block", async (req, res) => {
+app.put("/users/:user_id/status", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
 
   try {
@@ -615,26 +614,30 @@ app.put("/users/:user_id/block", async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
     if (req.user.role !== "Admin") {
       return res
         .status(403)
         .json({ message: "Only admins can change user status" });
     }
 
-    await user.update({ status: "Blocked" });
+    const newStatus = user.status === "Active" ? "Blocked" : "Active";
+    await user.update({ status: newStatus });
 
-    return res.status(200).json({ message: "User blocked successfully" });
+    return res.status(200).json({
+      message: `User status updated to ${newStatus} successfully`,
+    });
   } catch (error) {
     return res.status(500).json({
-      message: "Error blocking user",
+      message: "Error updating user status",
       error: error.message,
     });
   }
 });
 
-app.put("/users/:user_id/role", async (req, res) => {
+app.put("/users/:user_id/role", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
-  const { role } = req.body; // expected role: 'Admin' or 'User'
+  const { role } = req.body;
 
   if (req.user.role !== "Admin") {
     return res
@@ -659,7 +662,7 @@ app.put("/users/:user_id/role", async (req, res) => {
   }
 });
 
-app.delete("/users/:user_id", async (req, res) => {
+app.delete("/users/:user_id", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
 
   if (req.user.role !== "Admin") {
@@ -683,31 +686,80 @@ app.delete("/users/:user_id", async (req, res) => {
   }
 });
 
-app.put("/users/:user_id/remove-admin", async (req, res) => {
-  const { user_id } = req.params;
-
-  if (req.user.user_id !== parseInt(user_id)) {
-    return res
-      .status(403)
-      .json({ message: "You can only remove your own admin privileges" });
-  }
+app.delete("/users/delete-own-account", authenticateToken, async (req, res) => {
+  const userId = req.user.id; // Assuming the user's ID is stored in the JWT token and is available in req.user
 
   try {
-    const adminCount = await User.count({ where: { role: "Admin" } });
+    const user = await User.findByPk(userId);
 
-    if (adminCount <= 1) {
-      return res.status(400).json({
-        message:
-          "You cannot remove your admin privileges because you are the only admin",
-      });
-    }
-
-    const user = await User.findByPk(user_id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    await user.update({ role: "User" });
+    if (user.role !== "Admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admins can delete their own account" });
+    }
+
+    const otherAdmins = await User.findAll({
+      where: {
+        role: "Admin",
+        user_id: { [Sequelize.Op.ne]: userId },
+      },
+    });
+
+    if (otherAdmins.length === 0) {
+      return res.status(400).json({
+        message:
+          "You are the only admin. Assign another admin before deleting your account.",
+      });
+    }
+
+    await user.destroy();
+
+    res.status(200).json({ message: "Account deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting account:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/users/:user_id/remove-admin", authenticateToken, async (req, res) => {
+  const { user_id } = req.params;
+  const currentUserId = req.user.user_id;
+
+  // Check if the requester is an admin
+  if (req.user.role !== "Admin") {
+    return res
+      .status(403)
+      .json({ message: "Only admins can remove admin privileges" });
+  }
+
+  try {
+    // Fetch the user to be updated
+    const userToRemove = await User.findByPk(user_id);
+    if (!userToRemove) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if the user to be removed is an admin
+    if (userToRemove.role !== "Admin") {
+      return res.status(400).json({ message: "User is not an admin" });
+    }
+
+    // Ensure there's at least one admin remaining if the user is not the requester
+    if (user_id !== currentUserId) {
+      const adminCount = await User.count({ where: { role: "Admin" } });
+      if (adminCount <= 1) {
+        return res.status(400).json({
+          message: "Cannot remove admin privileges as it would leave no admin",
+        });
+      }
+    }
+
+    // Update the user's role to 'User'
+    await userToRemove.update({ role: "User" });
 
     return res
       .status(200)
