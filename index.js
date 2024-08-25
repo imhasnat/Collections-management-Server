@@ -29,12 +29,6 @@ app.use(
     credentials: true,
   })
 );
-// app.use(
-//   cors({
-//     origin: "http://localhost:5173",
-//     credentials: true,
-//   })
-// );
 
 app.use(express.json());
 
@@ -117,7 +111,6 @@ app.post("/login", async (req, res) => {
       secure: process.env.NODE_ENV === "production",
       sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      // domain: "https://collections-manage.netlify.app/",
     });
 
     await user.update({ last_login: new Date() });
@@ -689,7 +682,7 @@ app.delete("/users/:user_id", authenticateToken, async (req, res) => {
     }
   } catch (error) {
     console.error("Error deleting user/account:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: error.message });
   }
 });
 
@@ -723,6 +716,16 @@ app.put("/users/:user_id/role", authenticateToken, async (req, res) => {
     return res
       .status(500)
       .json({ message: "Error updating user role.", error: error.message });
+  }
+});
+
+app.get("/tags", async (req, res) => {
+  try {
+    const allTags = await Tag.findAll();
+    res.status(200).json({ message: "Tag fetch successfully", data: allTags });
+  } catch (error) {
+    console.error("Tag fetch failed", error);
+    res.status(500).json({ message: error.message });
   }
 });
 
