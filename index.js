@@ -4,6 +4,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const sequelize = require("./database");
+const { Op } = require("sequelize");
 const cookieParser = require("cookie-parser");
 const models = require("./models");
 
@@ -28,6 +29,12 @@ app.use(
     credentials: true,
   })
 );
+// app.use(
+//   cors({
+//     origin: "http://localhost:5173",
+//     credentials: true,
+//   })
+// );
 
 app.use(express.json());
 
@@ -108,7 +115,7 @@ app.post("/login", async (req, res) => {
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "None",
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       // domain: "https://collections-manage.netlify.app/",
     });
@@ -152,7 +159,7 @@ app.get("/auth/status", (req, res) => {
   }
 });
 
-// Create a new collection
+// Get all collections
 app.get("/collection", async (req, res) => {
   try {
     const collections = await Collection.findAll({
@@ -168,13 +175,12 @@ app.get("/collection", async (req, res) => {
   }
 });
 
-// Get all collections
+// Create a new collection
 app.post("/collection", async (req, res) => {
   try {
     const { name, description, topic, image_url, user_id, custom_fields } =
       req.body;
 
-    // Create the collection and get the full object
     const collection = await Collection.create({
       user_id,
       name,
@@ -405,22 +411,18 @@ app.delete("/items/:item_id", async (req, res) => {
   const { item_id } = req.params;
 
   try {
-    // Start a transaction
     const result = await sequelize.transaction(async (t) => {
-      // Find the item
       const item = await Item.findByPk(item_id, { transaction: t });
 
       if (!item) {
         throw new Error("Item not found");
       }
 
-      // Delete associated custom field values
       await CustomFieldValue.destroy({
         where: { item_id: item_id },
         transaction: t,
       });
 
-      // Delete the item itself
       await item.destroy({ transaction: t });
 
       return item;
@@ -465,19 +467,15 @@ app.put("/items/:item_id", async (req, res) => {
   const { name, custom_field_values, tags } = req.body;
 
   try {
-    // 1. Update item name
     if (name) {
       await Item.update({ name }, { where: { item_id } });
       console.log(`Item name updated to ${name}`);
     }
 
-    // 2. Update custom field values
     if (custom_field_values && Object.keys(custom_field_values).length > 0) {
-      // Remove old custom field values
       await CustomFieldValue.destroy({ where: { item_id } });
       console.log(`Old custom field values for item_id ${item_id} deleted`);
 
-      // Add new custom field values
       const customFieldData = Object.entries(custom_field_values).map(
         ([custom_field_id, field_value]) => ({
           item_id: item_id,
@@ -574,10 +572,6 @@ app.get("/recent/items", async (req, res) => {
           model: CustomField,
           as: "custom_fields",
         },
-        {
-          model: Tag,
-          through: { attributes: [] },
-        },
       ],
       order: [["created_at", "DESC"]],
       limit: 10,
@@ -590,6 +584,7 @@ app.get("/recent/items", async (req, res) => {
   }
 });
 
+// get all user
 app.get("/users", authenticateToken, async (req, res) => {
   try {
     const { role } = req.user;
@@ -606,6 +601,7 @@ app.get("/users", authenticateToken, async (req, res) => {
   }
 });
 
+// change status
 app.put("/users/:user_id/status", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
 
@@ -635,140 +631,98 @@ app.put("/users/:user_id/status", authenticateToken, async (req, res) => {
   }
 });
 
-app.put("/users/:user_id/role", authenticateToken, async (req, res) => {
-  const { user_id } = req.params;
-  const { role } = req.body;
-
-  if (req.user.role !== "Admin") {
-    return res
-      .status(403)
-      .json({ message: "Only admins can change user roles" });
-  }
-
-  try {
-    const user = await User.findByPk(user_id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    await user.update({ role });
-
-    return res.status(200).json({ message: `User role updated to ${role}` });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Error updating user role",
-      error: error.message,
-    });
-  }
-});
-
+// delete a user
 app.delete("/users/:user_id", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
-
-  if (req.user.role !== "Admin") {
-    return res.status(403).json({ message: "Only admins can delete users" });
-  }
+  const currentUserId = req.user.id;
 
   try {
     const user = await User.findByPk(user_id);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    await user.destroy();
-
-    return res.status(200).json({ message: "User deleted successfully" });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Error deleting user",
-      error: error.message,
-    });
-  }
-});
-
-app.delete("/users/delete-own-account", authenticateToken, async (req, res) => {
-  const userId = req.user.id; // Assuming the user's ID is stored in the JWT token and is available in req.user
-
-  try {
-    const user = await User.findByPk(userId);
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (user.role !== "Admin") {
-      return res
-        .status(403)
-        .json({ message: "Only admins can delete their own account" });
-    }
+    if (user_id == currentUserId) {
+      if (user.role !== "Admin") {
+        return res
+          .status(403)
+          .json({ message: "Only admins can delete their own account" });
+      }
 
-    const otherAdmins = await User.findAll({
-      where: {
-        role: "Admin",
-        user_id: { [Sequelize.Op.ne]: userId },
-      },
-    });
-
-    if (otherAdmins.length === 0) {
-      return res.status(400).json({
-        message:
-          "You are the only admin. Assign another admin before deleting your account.",
+      // Check if there are other admins before allowing deletion
+      const otherAdmins = await User.findAll({
+        where: {
+          role: "Admin",
+          user_id: { [Op.ne]: currentUserId },
+        },
       });
+      console.log(otherAdmins);
+
+      if (otherAdmins.length === 0) {
+        return res.status(400).json({
+          message:
+            "You are the only admin. Assign another admin before deleting your account.",
+        });
+      }
+
+      await user.destroy();
+      res.clearCookie("authToken");
+      return res
+        .status(200)
+        .json({ role: "admin", message: "Account deleted successfully" });
+    } else {
+      if (req.user.role !== "Admin") {
+        return res
+          .status(403)
+          .json({ message: "Only admins can delete users" });
+      }
+
+      if (user.role === "Admin") {
+        return res
+          .status(403)
+          .json({ message: "Admins cannot delete other admin accounts" });
+      }
+
+      await user.destroy();
+      return res.status(200).json({ message: "User deleted successfully" });
     }
-
-    await user.destroy();
-
-    res.status(200).json({ message: "Account deleted successfully" });
   } catch (error) {
-    console.error("Error deleting account:", error);
+    console.error("Error deleting user/account:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put("/users/:user_id/remove-admin", authenticateToken, async (req, res) => {
+// change role
+app.put("/users/:user_id/role", authenticateToken, async (req, res) => {
   const { user_id } = req.params;
-  const currentUserId = req.user.user_id;
 
-  // Check if the requester is an admin
+  if (req.user.user_id === parseInt(user_id)) {
+    return res
+      .status(403)
+      .json({ message: "Admins cannot change their own role." });
+  }
+
   if (req.user.role !== "Admin") {
     return res
       .status(403)
-      .json({ message: "Only admins can remove admin privileges" });
+      .json({ message: "Only admins can change user roles." });
   }
 
   try {
-    // Fetch the user to be updated
-    const userToRemove = await User.findByPk(user_id);
-    if (!userToRemove) {
-      return res.status(404).json({ message: "User not found" });
+    const user = await User.findByPk(user_id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
     }
 
-    // Check if the user to be removed is an admin
-    if (userToRemove.role !== "Admin") {
-      return res.status(400).json({ message: "User is not an admin" });
-    }
+    const newRole = user.role === "Admin" ? "User" : "Admin";
+    await user.update({ role: newRole });
 
-    // Ensure there's at least one admin remaining if the user is not the requester
-    if (user_id !== currentUserId) {
-      const adminCount = await User.count({ where: { role: "Admin" } });
-      if (adminCount <= 1) {
-        return res.status(400).json({
-          message: "Cannot remove admin privileges as it would leave no admin",
-        });
-      }
-    }
-
-    // Update the user's role to 'User'
-    await userToRemove.update({ role: "User" });
-
-    return res
-      .status(200)
-      .json({ message: "Admin privileges removed successfully" });
+    return res.status(200).json({ message: `User role updated to ${newRole}` });
   } catch (error) {
-    return res.status(500).json({
-      message: "Error removing admin privileges",
-      error: error.message,
-    });
+    return res
+      .status(500)
+      .json({ message: "Error updating user role.", error: error.message });
   }
 });
 
