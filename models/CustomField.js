@@ -36,7 +36,7 @@ const CustomField = sequelize.define(
     tableName: "custom_fields",
     timestamps: true,
     createdAt: "created_at",
-    updatedAt: false, // Only createdAt is tracked, no updatedAt
+    updatedAt: false,
   }
 );
 

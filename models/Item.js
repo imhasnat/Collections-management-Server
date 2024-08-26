@@ -17,12 +17,9 @@ const Item = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
-    // tags: {
-    //   type: DataTypes.JSON,
-    // },
   },
   {
-    tableName: "items", // Use snake_case for table names
+    tableName: "items",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",

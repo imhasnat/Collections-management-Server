@@ -330,13 +330,8 @@ app.post("/collections/:collection_id/items", async (req, res) => {
       name,
       collection_id: req.params.collection_id,
     });
-    console.log("Item created:", item.toJSON());
 
     if (custom_field_values && Object.keys(custom_field_values).length > 0) {
-      console.log(
-        "Attempting to create custom field values:",
-        custom_field_values
-      );
       const createdCustomFieldValues = await CustomFieldValue.bulkCreate(
         Object.entries(custom_field_values).map(
           ([custom_field_id, field_value]) => ({
@@ -346,13 +341,8 @@ app.post("/collections/:collection_id/items", async (req, res) => {
           })
         )
       );
-      console.log("Created custom field values:", createdCustomFieldValues);
-    } else {
-      console.log("No custom field values to create");
     }
-
     if (tags && tags.length > 0) {
-      console.log("Attempting to create tags:", tags);
       const uniqueTags = [...new Set(tags)];
       const tagRecords = await Promise.all(
         uniqueTags.map((tagName) =>
@@ -362,15 +352,11 @@ app.post("/collections/:collection_id/items", async (req, res) => {
           })
         )
       );
-      console.log("Tag records:", tagRecords);
       const tagAssociations = tagRecords.map(([tag]) => ({
         item_id: item.item_id,
         tag_id: tag.tag_id,
       }));
       const createdItemTags = await ItemTag.bulkCreate(tagAssociations);
-      console.log("Created item tags:", createdItemTags);
-    } else {
-      console.log("No tags to create");
     }
 
     res.status(201).json(item);
@@ -468,12 +454,10 @@ app.put("/items/:item_id", async (req, res) => {
   try {
     if (name) {
       await Item.update({ name }, { where: { item_id } });
-      console.log(`Item name updated to ${name}`);
     }
 
     if (custom_field_values && Object.keys(custom_field_values).length > 0) {
       await CustomFieldValue.destroy({ where: { item_id } });
-      console.log(`Old custom field values for item_id ${item_id} deleted`);
 
       const customFieldData = Object.entries(custom_field_values).map(
         ([custom_field_id, field_value]) => ({
@@ -483,7 +467,6 @@ app.put("/items/:item_id", async (req, res) => {
         })
       );
       await CustomFieldValue.bulkCreate(customFieldData);
-      console.log(`New custom field values created for item_id ${item_id}`);
     }
 
     // 3. Update tags
@@ -497,11 +480,6 @@ app.put("/items/:item_id", async (req, res) => {
           })
         )
       );
-      console.log(
-        `Tags found or created: ${tagInstances
-          .map(([tag]) => tag.tag_name)
-          .join(", ")}`
-      );
 
       // Remove old associations
       await ItemTag.destroy({ where: { item_id } });
@@ -512,7 +490,6 @@ app.put("/items/:item_id", async (req, res) => {
         tag_id: tag.tag_id,
       }));
       await ItemTag.bulkCreate(itemTags);
-      console.log(`Tags associated with item_id ${item_id}`);
     }
 
     // Fetch the updated item with its associations
@@ -669,7 +646,6 @@ app.delete("/users/:user_id", authenticateToken, async (req, res) => {
           user_id: { [Op.ne]: currentUserId },
         },
       });
-      console.log(otherAdmins);
 
       if (otherAdmins.length === 0) {
         return res.status(400).json({

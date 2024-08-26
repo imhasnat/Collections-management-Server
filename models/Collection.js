@@ -28,7 +28,7 @@ const Collection = sequelize.define(
     },
   },
   {
-    tableName: "collections", // snake_case for table name
+    tableName: "collections",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
