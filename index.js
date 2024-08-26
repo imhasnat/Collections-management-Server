@@ -172,7 +172,7 @@ app.get("/collection", async (req, res) => {
 });
 
 // Create a new collection
-app.post("/collection", authenticateToken, async (req, res) => {
+app.post("/collection", async (req, res) => {
   try {
     const { name, description, topic, image_url, user_id, custom_fields } =
       req.body;
@@ -256,7 +256,7 @@ app.get("/collection/:collection_id/custom-fields", async (req, res) => {
 });
 
 // Update a collection
-app.put("/collection/:collection_id", authenticateToken, async (req, res) => {
+app.put("/collection/:collection_id", async (req, res) => {
   try {
     const { name, description, topic, image_url, custom_fields } = req.body;
     const collection = await Collection.findByPk(req.params.collection_id);
@@ -414,7 +414,7 @@ app.get("/collection/:collection_id/items", async (req, res) => {
   }
 });
 
-app.delete("/items/:item_id", authenticateToken, async (req, res) => {
+app.delete("/items/:item_id", async (req, res) => {
   const { item_id } = req.params;
 
   try {
@@ -469,7 +469,7 @@ app.get("/items/:item_id", async (req, res) => {
   }
 });
 
-app.put("/items/:item_id", authenticateToken, async (req, res) => {
+app.put("/items/:item_id", async (req, res) => {
   const { item_id } = req.params;
   const { name, custom_field_values, tags } = req.body;
 
