@@ -284,22 +284,18 @@ app.put("/collection/:collection_id", async (req, res) => {
 });
 
 // Delete a collection
-app.delete(
-  "/collection/:collection_id",
-  authenticateToken,
-  async (req, res) => {
-    try {
-      const collection = await Collection.findByPk(req.params.collection_id);
-      if (!collection) {
-        return res.status(404).json({ message: "Collection not found" });
-      }
-      await collection.destroy();
-      res.json({ message: "Collection deleted successfully" });
-    } catch (error) {
-      res.status(400).json({ error: error.message });
+app.delete("/collection/:collection_id", async (req, res) => {
+  try {
+    const collection = await Collection.findByPk(req.params.collection_id);
+    if (!collection) {
+      return res.status(404).json({ message: "Collection not found" });
     }
+    await collection.destroy();
+    res.json({ message: "Collection deleted successfully" });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
-);
+});
 
 // ***************************************
 // **************** Item *****************
@@ -327,66 +323,62 @@ app.get("/items", async (req, res) => {
 });
 
 // Create a new item in a collection
-app.post(
-  "/collections/:collection_id/items",
-  authenticateToken,
-  async (req, res) => {
-    const { name, tags, custom_field_values } = req.body;
-    try {
-      const item = await Item.create({
-        name,
-        collection_id: req.params.collection_id,
-      });
-      console.log("Item created:", item.toJSON());
+app.post("/collections/:collection_id/items", async (req, res) => {
+  const { name, tags, custom_field_values } = req.body;
+  try {
+    const item = await Item.create({
+      name,
+      collection_id: req.params.collection_id,
+    });
+    console.log("Item created:", item.toJSON());
 
-      if (custom_field_values && Object.keys(custom_field_values).length > 0) {
-        console.log(
-          "Attempting to create custom field values:",
-          custom_field_values
-        );
-        const createdCustomFieldValues = await CustomFieldValue.bulkCreate(
-          Object.entries(custom_field_values).map(
-            ([custom_field_id, field_value]) => ({
-              item_id: item.item_id,
-              custom_field_id,
-              field_value,
-            })
-          )
-        );
-        console.log("Created custom field values:", createdCustomFieldValues);
-      } else {
-        console.log("No custom field values to create");
-      }
-
-      if (tags && tags.length > 0) {
-        console.log("Attempting to create tags:", tags);
-        const uniqueTags = [...new Set(tags)];
-        const tagRecords = await Promise.all(
-          uniqueTags.map((tagName) =>
-            Tag.findOrCreate({
-              where: { tag_name: tagName },
-              defaults: { tag_name: tagName },
-            })
-          )
-        );
-        console.log("Tag records:", tagRecords);
-        const tagAssociations = tagRecords.map(([tag]) => ({
-          item_id: item.item_id,
-          tag_id: tag.tag_id,
-        }));
-        const createdItemTags = await ItemTag.bulkCreate(tagAssociations);
-        console.log("Created item tags:", createdItemTags);
-      } else {
-        console.log("No tags to create");
-      }
-
-      res.status(201).json(item);
-    } catch (error) {
-      console.error("Error details:", error);
-      res.status(400).json({ error: error.message });
+    if (custom_field_values && Object.keys(custom_field_values).length > 0) {
+      console.log(
+        "Attempting to create custom field values:",
+        custom_field_values
+      );
+      const createdCustomFieldValues = await CustomFieldValue.bulkCreate(
+        Object.entries(custom_field_values).map(
+          ([custom_field_id, field_value]) => ({
+            item_id: item.item_id,
+            custom_field_id,
+            field_value,
+          })
+        )
+      );
+      console.log("Created custom field values:", createdCustomFieldValues);
+    } else {
+      console.log("No custom field values to create");
     }
+
+    if (tags && tags.length > 0) {
+      console.log("Attempting to create tags:", tags);
+      const uniqueTags = [...new Set(tags)];
+      const tagRecords = await Promise.all(
+        uniqueTags.map((tagName) =>
+          Tag.findOrCreate({
+            where: { tag_name: tagName },
+            defaults: { tag_name: tagName },
+          })
+        )
+      );
+      console.log("Tag records:", tagRecords);
+      const tagAssociations = tagRecords.map(([tag]) => ({
+        item_id: item.item_id,
+        tag_id: tag.tag_id,
+      }));
+      const createdItemTags = await ItemTag.bulkCreate(tagAssociations);
+      console.log("Created item tags:", createdItemTags);
+    } else {
+      console.log("No tags to create");
+    }
+
+    res.status(201).json(item);
+  } catch (error) {
+    console.error("Error details:", error);
+    res.status(400).json({ error: error.message });
   }
-);
+});
 
 // Get all items in a collection
 app.get("/collection/:collection_id/items", async (req, res) => {
