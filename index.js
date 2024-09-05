@@ -7,6 +7,8 @@ const sequelize = require("./database");
 const { Op } = require("sequelize");
 const cookieParser = require("cookie-parser");
 const models = require("./models");
+const axios = require("axios");
+const session = require("express-session");
 
 const {
   User,
@@ -25,15 +27,29 @@ app.use(cookieParser());
 
 app.use(
   cors({
-    origin: "https://collections-manage.netlify.app",
+    origin: "https://collections-manage.netlify.app/",
     credentials: true,
+  })
+);
+
+app.use(
+  session({
+    secret: process.env.JWT_SECRET || "mySecreteKey",
+    resave: false,
+    saveUninitialized: true,
+    cookie: {
+      secure: false,
+      sameSite: "none",
+    },
   })
 );
 
 app.use(express.json());
 
 const authenticateToken = (req, res, next) => {
-  const token = req.cookies.token;
+  // Get token from Authorization header
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1]; // Extract token from "Bearer <token>"
 
   if (!token) return res.status(401).json({ message: "Access Denied" });
 
@@ -75,6 +91,7 @@ app.post("/register", async (req, res) => {
 });
 
 // Login endpoint
+
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -106,15 +123,7 @@ app.post("/login", async (req, res) => {
       expiresIn: "7d",
     });
 
-    res.cookie("token", token, {
-      // httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "None",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    await user.update({ last_login: new Date() });
-
+    // Send token in the response body instead of setting a cookie
     return res
       .status(200)
       .json({ message: "Login successful", user: userData, token });
@@ -133,7 +142,7 @@ app.post("/logout", (req, res) => {
 });
 
 app.get("/auth/status", (req, res) => {
-  const token = req.cookies.token;
+  const token = req.headers.authorization?.split(" ")[1];
   if (!token) {
     return res.status(401).json({ message: "Not authenticated" });
   }
@@ -152,10 +161,6 @@ app.get("/auth/status", (req, res) => {
   }
 });
 
-// ***************************************
-// ********** COLLECTION *****************
-// ***************************************
-// Get all collections
 app.get("/collection", async (req, res) => {
   try {
     const collections = await Collection.findAll({
@@ -711,6 +716,267 @@ app.put("/users/:user_id/role", authenticateToken, async (req, res) => {
     return res
       .status(500)
       .json({ message: "Error updating user role.", error: error.message });
+  }
+});
+
+// *********************************
+// *********** JIRA ****************
+// *********************************
+const jiraDomain = process.env.JIRA_DOMAIN;
+const jiraEmail = process.env.JIRA_EMAIL;
+const jiraApiToken = process.env.JIRA_API_TOKEN;
+const jiraProjectKey = process.env.JIRA_PROJECT_KEY;
+
+const authHeader = `Basic ${Buffer.from(
+  `${jiraEmail}:${jiraApiToken}`
+).toString("base64")}`;
+
+async function getUserByEmail(email) {
+  try {
+    const response = await axios.get(
+      `https://${jiraDomain}/rest/api/3/user/search?query=${email}`,
+      {
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    return response.data.length > 0 ? response.data[0].accountId : null;
+  } catch (error) {
+    console.error("Error checking if user exists:", error.message);
+    return null;
+  }
+}
+
+async function inviteUserToJira(email) {
+  try {
+    // Invite the user with the correct product access
+    const response = await axios.post(
+      `https://${jiraDomain}/rest/api/3/user`,
+      {
+        emailAddress: email,
+        displayName: email.split("@")[0],
+        products: ["jira-software"], // Ensure this is the correct application key
+      },
+      {
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(response.data);
+
+    return {
+      message:
+        "You are invited. Please ask the user to accept the invite and try again.",
+    };
+  } catch (error) {
+    console.error(
+      "Error inviting user to Jira:",
+      error.response ? error.response.data : error.message
+    );
+    return {
+      message: `Error inviting user to Jira:  ${error.message}`,
+    };
+  }
+}
+
+async function handleJiraIssueCreation(
+  summary,
+  priority,
+  email,
+  collection = "",
+  link
+) {
+  try {
+    // Check if the user exists in the project
+    const user = await getUserByEmail(email);
+
+    if (!user) {
+      console.log("User does not exist, inviting and adding to project...");
+      const inviteResponse = await inviteUserToJira(email);
+      return {
+        message: inviteResponse.message,
+      };
+    } else {
+      console.log("User already exists in Jira.");
+      // Create the issue since the user exists
+      console.log("Creating issue for user:", user);
+
+      // Get the custom field IDs
+      const collectionFieldId = await getCustomFieldId("Collection");
+      const linkFieldId = await getCustomFieldId("Link");
+
+      const customFields = {
+        [collectionFieldId]: collection,
+        [linkFieldId]: link,
+      };
+
+      const issue = await createJiraIssue(
+        summary,
+        priority,
+        user,
+        customFields
+      );
+      return {
+        message: "Issue created successfully",
+        issueKey: issue.key,
+        issueUrl: `https://${jiraDomain}/browse/${issue.key}`,
+      };
+    }
+  } catch (error) {
+    console.error("Error in handleJiraIssueCreation:", error.message);
+    throw error;
+  }
+}
+
+async function getAvailablePriorityValues() {
+  try {
+    const response = await axios.get(
+      `https://${jiraDomain}/rest/api/3/priority`,
+      {
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error(
+      "Error retrieving priority values:",
+      error.response?.data || error.message
+    );
+    throw error;
+  }
+}
+
+async function getPriorityName(priorityValue) {
+  const priorityValues = await getAvailablePriorityValues();
+  const priority = priorityValues.find(
+    (p) => p.name.toLowerCase() === priorityValue.toLowerCase()
+  );
+  if (!priority) {
+    throw new Error(`Invalid priority value: ${priorityValue}`);
+  }
+  return priority.name;
+}
+
+async function createJiraIssue(
+  summary,
+  priority,
+  assigneeAccountId,
+  customFields = {}
+) {
+  try {
+    const priorityName = await getPriorityName(priority);
+
+    const issueFields = {
+      project: {
+        key: jiraProjectKey,
+      },
+      summary: summary,
+      issuetype: {
+        name: "Task",
+      },
+      assignee: {
+        accountId: assigneeAccountId,
+      },
+      priority: {
+        name: priorityName,
+      },
+      reporter: {
+        accountId: assigneeAccountId,
+      },
+    };
+
+    // Add custom fields to the issueFields object
+    Object.entries(customFields).forEach(([fieldId, value]) => {
+      issueFields[`customfield_${fieldId}`] = value;
+    });
+
+    const response = await axios.post(
+      `https://${jiraDomain}/rest/api/3/issue`,
+      { fields: issueFields },
+      {
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return { message: "Issue created successfully" };
+  } catch (error) {
+    console.error(
+      "Error creating Jira issue:",
+      error.response?.data || error.message
+    );
+    return { message: "Issue created successfully" };
+  }
+}
+
+async function getCustomFieldId(fieldName) {
+  try {
+    const response = await axios.get(`https://${jiraDomain}/rest/api/3/field`, {
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const field = response.data.find(
+      (f) => f.name.toLowerCase() === fieldName.toLowerCase()
+    );
+    if (!field) {
+      throw new Error(`Custom field '${fieldName}' not found.`);
+    }
+    return field.id.replace("customfield_", "");
+  } catch (error) {
+    console.error("Error getting custom field ID:", error.message);
+    throw error;
+  }
+}
+
+app.post("/create-jira-issue", async (req, res) => {
+  const { summary, priority, email, collection, link } = req.body;
+  console.log();
+
+  try {
+    const result = await handleJiraIssueCreation(
+      summary,
+      priority,
+      email,
+      collection,
+      link
+    );
+    res.json({ message: result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/user/tickets", async (req, res) => {
+  const { email } = req.query;
+  const accountId = await getUserByEmail(email);
+  console.log(email);
+  try {
+    const response = await axios.get(
+      `https://${jiraDomain}/rest/api/3/search?jql=reporter=${accountId}`,
+      {
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    res.send({ result: response.data.issues, domain: jiraDomain });
+  } catch (error) {
+    console.error("Error fetching issues for user:", error.message);
+    throw error;
   }
 });
 

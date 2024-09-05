@@ -38,6 +38,14 @@ const User = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    salesforce_account_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    salesforce_contact_id: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "users",
